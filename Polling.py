@@ -1,8 +1,8 @@
 import queue
-
+from header import *
 import primitives as pri
 import funsocket as fs
-from queue import Queue
+
 
 import socket
 import threading
@@ -14,47 +14,14 @@ import pandas as pd
 import numpy as np
 from queue import Queue
 
-ports_polling_request_MBA = {'1': 5001, '2': 5002, '3': 5003, '4': 5004, '5': 5005, '6': 5006, '7': 5007}
-ports_vote_collection = {'1': 6001, '2': 6002, '3': 6003, '4': 6004, '5': 6005, '6': 6006, '7': 6007}
-secrets = {
-    '1': {'2': pri.secret_1_2, '3': pri.secret_1_3, '4': pri.secret_1_4, '5': pri.secret_1_5, '6': pri.secret_1_6},
-    '2': {'1': pri.secret_1_2, '3': pri.secret_2_3, '4': pri.secret_2_4, '5': pri.secret_2_5, '6': pri.secret_2_6},
-    '3': {'1': pri.secret_1_3, '2': pri.secret_2_3, '4': pri.secret_3_4, '5': pri.secret_3_5},
-    '4': {'1': pri.secret_1_4, '2': pri.secret_2_4, '3': pri.secret_3_4, '5': pri.secret_4_5},
-    '5': {'1': pri.secret_1_5, '2': pri.secret_2_5, '3': pri.secret_3_5, '4': pri.secret_4_5},
-    '6': {'1': pri.secret_1_6, '2': pri.secret_2_6},
-    '7': {'4': pri.secret_4_7}
-}
-
-neighbors = {
-    '1': ['2', '3', '4', '5', '6'],
-    '2': ['1', '3', '4', '5', '6'],
-    '3': ['1', '2', '4', '5'],
-    '4': ['1', '2', '3', '5', '7'],
-    '5': ['1', '2', '3', '4'],
-    '6': ['1', '2'],
-    '7': ['4']
-}
-
-# Security tables dev_nodeID
-dev_1 = pd.read_csv('test_inputs/dev_1.csv')
-dev_2 = pd.read_csv('test_inputs/dev_2.csv')
-dev_3 = pd.read_csv('test_inputs/dev_3.csv')
-dev_4 = pd.read_csv('test_inputs/dev_4.csv')
-dev_5 = pd.read_csv('test_inputs/dev_5.csv')
-dev_6 = pd.read_csv('test_inputs/dev_6.csv')
-dev_7 = pd.read_csv('test_inputs/dev_7.csv')
-
-
-# df_new=dev_1[dev_1['ID'] == 5]
-# df_new.set_index('ID', inplace=True) # maybe not
-# df_new.to_dict()
 class node:
     def __init__(self, ID, debug=False):
         self.ID = ID
         self.CA_complete = False
         self.debug = debug
+        self.poll_requests_secbeat = [] # Nodes for which poll requests have been received in current secbeat
         self.votes_q = Queue()  # Queue to store votes received
+        self.lock_polling_request = threading.Lock()
         self.lock_polling_response = threading.Lock()
         voter_server_thread = threading.Thread(target=self.voter_server, args=(), daemon=False)
         voter_server_thread.start()
@@ -157,6 +124,10 @@ class node:
 
             # Checks if received message is a polling request or MBA, then call appropriate functions
             if message_dict["Subject"] == 'Polling Request':
+                # Append sus_ID to polling_requests_secbeat
+                with self.lock_polling_request:
+                    self.poll_requests_secbeat.append(message_dict["Suspected_ID"])
+                    #TODO self.poll_requests_secbeat.extend(message_dict["Suspected_IDs"])
                 # Handle polling request
                 self.polling_response(message_dict)
 
@@ -209,7 +180,7 @@ class node:
         return result
 
     def polling_server(self, polling_response_threads, polling_respondents):
-        # Listen for any MBA/ Polling request
+        # Create socket to receive polling responses
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             print("Starting voting server at node ", self.ID)
@@ -253,11 +224,12 @@ class node:
         lock_polling_request = threading.Lock()
         polling_response_threads = []
         polling_respondents = []
-        # Start server to collect votes
+        # Start server socket to collect votes
         polling_server_thread = threading.Thread(target=self.polling_server, args=(polling_response_threads, polling_respondents), daemon=False)
         polling_server_thread.start()
 
         # Start poll at polling node
+        # nodes to poll: neighbors except suspected node
         polling_requests = neighbors[self.ID]
         if sus_ID in polling_requests: polling_requests.remove(sus_ID)
         polling_request_threads = []
@@ -309,11 +281,6 @@ node_4 = node('4')
 node_5 = node('5')
 node_6 = node('6')
 node_7 = node('7')
-# test_server_thread = threading.Thread(target=test_server, args=(), daemon=True)
-# test_server_thread.start()
 
 node_1.conduct_polling(sus_ID='5')
-
-# test_server_thread.join()
-# def polling_node(self):
 
