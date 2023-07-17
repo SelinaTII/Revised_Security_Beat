@@ -1,0 +1,3 @@
+ID,MAC,IP,PubKey_fpr,MA_level,CA_Result,CA_Server
+7a,04:f0:21:9e:6b:79,10.10.10.7,6a31a0f746d1efddaa03ebe7a04110eeb52850b82d3f933e924dc791b70fd6df,1,0,
+4a,04:f0:21:9e:6b:49,10.10.10.4,6a31a0f746d1efddaa03ebe7a04110eeb52850b82d3f933e924dc791b70fd6cd,1,1,7a
