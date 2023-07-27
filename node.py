@@ -1,25 +1,18 @@
-import queue
 from header import *
 import primitives as pri
-import funsocket as fs
 import decision_engine
 import polling.polling_responder as polling_responder
 import polling.polling_requester as polling_requester
 import mba
-
+import quarantine.quarantine as quarantine
 
 import socket
 import threading
-import contextlib
 import cryptography.exceptions
-import time
 import json
 import pandas as pd
-import numpy as np
-from queue import Queue
-import multiprocessing
+import os
 
-# TODO: check if daemon should be true or false in actual code
 class node:
     # TODO: in actual code: remove sending node ID in socket connections, remove use of separate ports for different nodes -> should be IPs
     def __init__(self, ID, IP, debug=False, test=False):
@@ -29,6 +22,9 @@ class node:
         self.debug = debug
         self.poll_requests_secbeat = [] # Nodes for which poll requests have been received in current secbeat
         self.lock_polling_request = threading.Lock()
+        self.lock_blacklist = threading.Lock()
+        self.blacklist_dir = './auth'
+        self.blacklist_filename = f'blacklist_{self.ID}.csv'  # TODO: In actual implementation, the name will be only blacklist.csv
         if not test:
             server_thread = threading.Thread(target=self.poll_mba_server, args=(), daemon=False)
             server_thread.start()
@@ -83,8 +79,24 @@ class node:
                     print("Received MBA message at node " + self.ID + " from node " + sending_node)
                     print("Received message: {}".format(message_dict))
                 # TODO: check if MBA for malicious node has already been received and forwarded in current secbeat
+                for mal_ID in message_dict["Malicious_ID"]:
+                    mal_IP = message_dict["Malicious_IP"][mal_ID]
+                    quarantine_period = message_dict["Quarantine_Period"][mal_ID]
+                    # Block malicious node
+                    qua = quarantine.Quarantine(mal_id=mal_ID, mal_ip=mal_IP, quarantine_period=quarantine_period,
+                                                blacklist_lock=self.lock_blacklist,
+                                                blacklist_dir=self.blacklist_dir,
+                                                blacklist_filename=self.blacklist_filename)  # TODO: In actual implementation, remove taking blacklist_filename as argument. This is only done to test for multiple nodes in the same device
+                    qua.block()
+
+                # Get list of currently blacklisted nodes
+                with self.lock_blacklist:
+                    df = pd.read_csv(os.path.join(self.blacklist_dir, self.blacklist_filename))
+                blacklisted_IPs = df['IP'].unique().tolist()
+                #total_mal_IPs = list(set(blacklisted_IPs + [message_dict["Malicious_IP"]]))  # blacklisted IPs as well as mal_IPs currently detected
                 # Create MBA object
-                mba_receiver = mba.MBA(myID=self.ID, myIP=self.IP, mal_IPs=message_dict["Malicious_IPs"],neigh_IPs=neigh_IPs[self.ID], quarantine_period=message_dict["Quarantine_Period"])
+                # TODO: get mal_IPs from node object's mal_IDs attribute?
+                mba_receiver = mba.MBA(myID=self.ID, myIP=self.IP, mal_IDs=message_dict["Malicious_ID"], mal_IPs=message_dict["Malicious_IP"],blacklisted_IPs=blacklisted_IPs,neigh_IPs=neigh_IPs[self.ID], quarantine_periods=message_dict["Quarantine_Period"])
                 to_send_IPs = mba_receiver.compute_next_to_send_Ips(mba_message=message_dict)
                 # If there are nodes in to_send_IPs to whom MBA should be forwarded
                 if to_send_IPs:

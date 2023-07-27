@@ -1,25 +1,30 @@
 import json
 from header import *
 import socket
+import pandas
 class MBA:
-    def __init__(self, myID, myIP, mal_IPs, neigh_IPs, quarantine_period = 20, debug=True):
+    def __init__(self, myID, myIP, mal_IDs, mal_IPs, blacklisted_IPs, neigh_IPs, quarantine_periods, debug=True):
         self.myID = myID
         self.myIP = myIP
+        self.mal_IDs = mal_IDs
         self.mal_IPs = mal_IPs
+        self.blacklisted_IPs = blacklisted_IPs
         self.neigh_IPs = neigh_IPs
-        self.quarantine_period = quarantine_period
+        self.quarantine_periods = quarantine_periods
         self.debug = debug
 
     def create_mba_message(self):
         # Function to create a new MBA message when a node discovers one or more malicious nodes
-        to_send_IPs = list(set(self.neigh_IPs) - set(self.mal_IPs)) # 1 hop neighbors that are not malicious
+        # TODO: exclude nodes that are blacklisted and exclude other malicious nodes?
+        to_send_IPs = list(set(self.neigh_IPs) - set(self.mal_IPs.values()) - set(self.blacklisted_IPs)) # 1 hop neighbors that are not malicious
         to_send_IPs.sort() # sorting in ascending order for test
 
         if to_send_IPs:
             message = {
                 "Subject": "MBA",
-                "Malicious_IPs": self.mal_IPs,
-                "Quarantine_Period": self.quarantine_period,
+                "Malicious_ID": self.mal_IDs,
+                "Malicious_IP": self.mal_IPs,
+                "Quarantine_Period": self.quarantine_periods,
                 "Polling_IP": self.myIP,
                 "Destination_IPs": to_send_IPs
             }
@@ -29,7 +34,7 @@ class MBA:
     def compute_next_to_send_Ips(self, mba_message):
         # Given that an MBA message is received, this function computes IPs of nodes that the MBA should be forwarded to
         # Next to Send IPs = 1 hop neighbors that are not malicious and are not in Destination IPs or Polling_IP
-        to_send_IPs = list(set(self.neigh_IPs) - set(self.mal_IPs) - set(mba_message["Destination_IPs"]) - {mba_message["Polling_IP"]})
+        to_send_IPs = list(set(self.neigh_IPs) - set(self.mal_IPs.values()) - set(self.blacklisted_IPs) - set(mba_message["Destination_IPs"]) - {mba_message["Polling_IP"]})
         return to_send_IPs
 
     def compute_mba_message_to_forward(self, mba_message, to_send_IPs):
@@ -51,7 +56,7 @@ class MBA:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 try:
                     if self.debug:
-                        print("Sending mba message to node " + destination_ID + " from node " + self.myID)
+                        print("Sending mba message for mal nodes: {} to node {} from node {}".format(mba_message["Malicious_IP"], destination_ID, self.myID))
                     sock.connect((destination_IP, port))
                     sock.sendall(bytes(self.myID, 'utf-8'))
                     data = sock.recv(4096)

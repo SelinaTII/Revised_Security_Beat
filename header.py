@@ -1,6 +1,6 @@
 import primitives as pri
 
-testcase = 3
+testcase = 1
 
 ips = {'1a': '10.10.10.1',
        '2a': '10.10.10.2',

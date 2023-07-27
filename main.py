@@ -1,5 +1,4 @@
 from header import *
-import Polling
 import pandas as pd
 import threading
 import time
@@ -7,7 +6,9 @@ import decision_engine
 import random
 import mba
 import polling.polling_requester as polling_requester
+import quarantine.quarantine as quarantine
 import node
+import os
 
 def sec_beat(myID, node):
     # This will be replaced by only_CA()
@@ -16,8 +17,8 @@ def sec_beat(myID, node):
     #sectable = only_ca(myID)
     sectable.drop_duplicates(inplace=True)
 
-    time.sleep(random.uniform(0, 1))
-    #time.sleep(int(myID[0]))
+    #time.sleep(random.uniform(0, 1))
+    time.sleep(int(myID[0]))
     if sectable.empty:
         print("Empty security table")
         print("Nothing to do")
@@ -48,32 +49,35 @@ def sec_beat(myID, node):
             mal_IDs = [key for key, val in result.items() if val == 194]
             print('mal_IDs:', mal_IDs)
 
+            #mal_IPs = list(set(sectable[sectable['ID'].isin(mal_IDs)]['IP'].to_list())) # TODO: get this from node object's mal_IDs attribute?
+            # Initialize empty dictionaries
+            mal_IPs = {}
+            quarantine_periods = {}
             # If there are malicious nodes, broadcast MBA to neighbors that are not malicious
-            if mal_IDs:
+            for mal_ID in mal_IDs:
                 # Mapping IDs to IPs
                 # TODO: fix in actual code
-                mal_IPs = list(set(sectable[sectable['ID'].isin(mal_IDs)]['IP'].to_list()))
-                mal_IPs.sort()
-                print('mal_IPs:', mal_IPs)
+                # TODO: run in parallel?
+                mal_IP = sectable[sectable['ID'] == mal_ID]['IP'].values[0]
+                quarantine_period = 30  # TODO: make it dependent on no of failures?
 
-                # Initialize mba object
-                mba_obj = mba.MBA(myID=node.ID, myIP=node.IP, mal_IPs=mal_IPs, neigh_IPs=neigh_IPs[myID])
-                to_send_IPs, mba_message = mba_obj.create_mba_message()
-                # If there are nodes in to_send_IPs to whom MBA should be sent
-                if to_send_IPs:
-                    mba_obj.send_mba_message(mba_message=mba_message, to_send_IPs=to_send_IPs)
+                mal_IPs[mal_ID] = mal_IP
+                quarantine_periods[mal_ID] = quarantine_period
 
-    """
-    ut.exchage_table(sectable, start_server_thread)
-    global_table = pd.read_csv('auth/global_table.csv')
-    if global_table.empty:
-        print("Empty Global security table")
-        print("Nothing to do")
-    else:
-        ness_result, mapp = decision_engine(global_table, ma, q)
-        #quaran(ness_result, q, sectable, ma, mapp)
-        quaran(ness_result, q, global_table, ma, mapp)
-    """
+                # Block malicious node
+                qua = quarantine.Quarantine(mal_id=mal_ID, mal_ip=mal_IP,quarantine_period=quarantine_period,blacklist_lock=node.lock_blacklist, blacklist_dir=node.blacklist_dir, blacklist_filename=node.blacklist_filename) # TODO: In actual implementation, remove taking blacklist_filename as argument. This is only done to test for multiple nodes in the same device
+                qua.block()
+
+            # Get list of currently blacklisted nodes
+            with node.lock_blacklist:
+                df = pd.read_csv(os.path.join(node.blacklist_dir, node.blacklist_filename))
+            blacklisted_IPs = df['IP'].unique().tolist()
+            # Call mba
+            mba_obj = mba.MBA(myID=node.ID, myIP=node.IP, mal_IDs=mal_IDs, mal_IPs=mal_IPs,blacklisted_IPs=blacklisted_IPs, neigh_IPs=neigh_IPs[myID], quarantine_periods=quarantine_periods)
+            to_send_IPs, mba_message = mba_obj.create_mba_message()
+            # If there are nodes in to_send_IPs to whom MBA should be sent
+            if to_send_IPs:
+                mba_obj.send_mba_message(mba_message=mba_message, to_send_IPs=to_send_IPs)
 
 def start_sec_beat(myID, myIP):
     # Initialize node and start socket to listen for any MBA/ Polling request
